@@ -1,31 +1,29 @@
 import streamlit as st
+import os
 import json
 import io
-import os
 import requests
-from dotenv import load_dotenv
 from docx import Document
 import pdfplumber
 
-# --- Load environment variables ---
-load_dotenv()
-api_key = os.getenv("GROQ_API_KEY")
+# --- Load environment variables for local use ---
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # ignore if dotenv is not installed (Streamlit Cloud)
 
-# Fallback: Streamlit Cloud secrets
+# --- Get API key ---
+api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
+
 if not api_key:
-    api_key = st.secrets.get("GROQ_API_KEY", None)
+    st.error("❌ API key not found! Set GROQ_API_KEY in .env (local) or Streamlit Secrets (cloud).")
+    st.stop()
 
 # --- Streamlit Page Config ---
 st.set_page_config(page_title="ResumeCoach AI", layout="wide")
 st.title("🎯 ResumeCoach AI")
 st.subheader("Your AI-powered mentor for a perfect resume.")
-
-# Check API Key
-if api_key:
-    st.success("🔑 API key loaded successfully!")
-else:
-    st.error("❌ API key not found! Set GROQ_API_KEY in `.env` or Streamlit Secrets.")
-    st.stop()
 
 
 # ---------------- File Processing ----------------
@@ -53,30 +51,21 @@ def get_resume_text(uploaded_file):
             return None
 
 
-# ---------------- Groq API Call ----------------
+# ---------------- Groq API Call via requests ----------------
 def call_groq_api(prompt, model="llama-3.1-8b-instant"):
-    """
-    Make a direct request to Groq's chat completions API using requests.
-    """
     url = "https://api.groq.com/v1/chat/completions"
-
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-
     data = {
         "model": model,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
+        "messages": [{"role": "user", "content": prompt}]
     }
-
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=60)
         response.raise_for_status()
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         st.error(f"API call error: {e}")
         return None
@@ -107,7 +96,7 @@ Job Description:
 """
     result = call_groq_api(system_prompt)
     if result:
-        st.text_area("🛠️ Raw API Response", result, height=300)
+        st.text_area("🛠️ Raw API Response (Feedback)", result, height=300)
         try:
             return json.loads(result)
         except json.JSONDecodeError:
@@ -144,7 +133,6 @@ st.markdown("Upload your resume and paste a job description. AI will provide fee
 col1, col2 = st.columns(2)
 with col1:
     uploaded_resume = st.file_uploader("Upload your resume", type=["pdf","docx","txt"])
-
 with col2:
     job_description = st.text_area("Paste Job Description", height=300)
 
