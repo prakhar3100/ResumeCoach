@@ -1,182 +1,179 @@
 import streamlit as st
-import os
 import json
 import io
-import requests
 from docx import Document
 import pdfplumber
+import os
 
-# --- Load environment variables for local use ---
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass  # ignore if dotenv is not installed (Streamlit Cloud)
+# Import Groq SDK
+from groq import Groq
 
-# --- Get API key ---
-api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
-
-if not api_key:
-    st.error("❌ API key not found! Set GROQ_API_KEY in .env (local) or Streamlit Secrets (cloud).")
-    st.stop()
-
-# --- Streamlit Page Config ---
 st.set_page_config(page_title="ResumeCoach AI", layout="wide")
 st.title("🎯 ResumeCoach AI")
 st.subheader("Your AI-powered mentor for a perfect resume.")
 
+# --- Load API key from Streamlit Secrets ---
+groq_api_key = st.secrets.get("GROQ_API_KEY")
+if not groq_api_key:
+    st.error("❌ GROQ_API_KEY not found in Streamlit Secrets. Please add it and restart.")
+    st.stop()
 
-# ---------------- File Processing ----------------
+# --- Initialize Groq client ---
+try:
+    client = Groq(api_key=groq_api_key)
+except Exception as e:
+    st.error(f"Error initializing Groq client: {e}")
+    st.stop()
+
+
+# --- Helper functions ---
 def get_resume_text(uploaded_file):
-    ext = os.path.splitext(uploaded_file.name)[1].lower()
-    if ext == ".pdf":
+    """Extract text from PDF, DOCX, or TXT."""
+    ext = uploaded_file.name.split('.')[-1].lower()
+
+    if ext == "pdf":
         try:
+            text = ""
             with pdfplumber.open(uploaded_file) as pdf:
-                return "\n".join([page.extract_text() or "" for page in pdf.pages])
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+            return text
         except Exception as e:
-            st.error(f"PDF reading error: {e}")
+            st.error(f"Error reading PDF: {e}")
             return None
-    elif ext == ".docx":
+
+    elif ext == "docx":
         try:
             doc = Document(uploaded_file)
-            return "\n".join([para.text for para in doc.paragraphs])
+            return "\n".join([p.text for p in doc.paragraphs])
         except Exception as e:
-            st.error(f"DOCX reading error: {e}")
+            st.error(f"Error reading DOCX: {e}")
             return None
-    else:
+
+    else:  # TXT or other text-based
         try:
-            return io.TextIOWrapper(uploaded_file, encoding="utf-8").read()
+            return io.TextIOWrapper(uploaded_file, encoding='utf-8').read()
         except Exception as e:
-            st.error(f"Text reading error: {e}")
+            st.error(f"Error reading text file: {e}")
             return None
 
 
-# ---------------- Groq API Call via requests ----------------
-def call_groq_api(prompt, model="llama-3.1-8b-instant"):
-    url = "https://api.groq.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}]
-    }
+def get_ai_feedback(resume_text, job_description):
+    """Get JSON feedback from Groq LLM."""
+    system_prompt = """
+You are an AI-powered resume coach. Analyze the resume and provide actionable feedback as a JSON object:
+{
+  "match_score": <0-100>,
+  "summary": "<short positive summary>",
+  "missing_keywords": ["<bullet1>", "<bullet2>"],
+  "formatting_suggestions": ["<bullet1>", "<bullet2>"],
+  "experience_improvements": ["<bullet1>", "<bullet2>"],
+  "overall_tips": ["<bullet1>", "<bullet2>"]
+}
+"""
+    user_prompt = f"Resume:\n{resume_text}\n\nJob Description:\n{job_description}"
+
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=60)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        # Use latest Groq endpoint
+        response = client.completions.create(
+            model="llama-3.1-8b-instant",
+            input=f"{system_prompt}\n{user_prompt}"
+        )
+
+        feedback_str = response.output_text
+        st.text_area("🛠️ Raw API Response (Feedback)", feedback_str, height=300)
+        return json.loads(feedback_str)
+
+    except json.JSONDecodeError as e:
+        st.error(f"JSON decoding error: {e}")
+        return None
     except Exception as e:
         st.error(f"API call error: {e}")
         return None
 
 
-# ---------------- AI Feedback ----------------
-def get_ai_feedback(resume_text, job_description):
-    system_prompt = f"""
-You are an AI resume coach. Analyze this resume against the job description and return a JSON object:
-{{
-  "match_score": <0-100>,
-  "summary": "<Short positive summary>",
-  "missing_keywords": ["<Bullet point>"],
-  "formatting_suggestions": ["<Bullet point>"],
-  "experience_improvements": ["<Bullet point>"],
-  "overall_tips": ["<Bullet point>"]
-}}
-
-Resume:
----
-{resume_text}
----
-
-Job Description:
----
-{job_description}
----
-"""
-    result = call_groq_api(system_prompt)
-    if result:
-        st.text_area("🛠️ Raw API Response (Feedback)", result, height=300)
-        try:
-            return json.loads(result)
-        except json.JSONDecodeError:
-            st.error("API returned invalid JSON.")
-            return None
-    return None
-
-
-# ---------------- Draft Resume ----------------
 def create_optimized_draft(resume_text, job_description):
-    system_prompt = f"""
-Rewrite the resume in Markdown format, optimized for this job description:
-
-Original Resume:
----
-{resume_text}
----
-
-Job Description:
----
-{job_description}
----
+    """Generate optimized resume draft."""
+    system_prompt = """
+You are a professional resume writer. Rewrite the resume to match the job description.
+Provide a markdown-formatted resume including:
+- Name (bold)
+- Contact info
+- Professional Summary
+- Experience (bullet points with keywords and quantified achievements)
+- Skills
+- Education
+- Optional sections: Projects, Certifications, Awards
 """
-    draft = call_groq_api(system_prompt)
-    if draft:
+    user_prompt = f"Original Resume:\n{resume_text}\n\nJob Description:\n{job_description}"
+
+    try:
+        response = client.completions.create(
+            model="llama-3.1-8b-instant",
+            input=f"{system_prompt}\n{user_prompt}"
+        )
+
+        draft = response.output_text
         st.text_area("🛠️ Raw API Response (Draft)", draft, height=300)
         return draft
-    return None
+
+    except Exception as e:
+        st.error(f"API call error: {e}")
+        return None
 
 
-# ---------------- Streamlit UI ----------------
-st.markdown("Upload your resume and paste a job description. AI will provide feedback and generate a draft.")
+# --- Streamlit UI ---
+st.markdown("Upload your resume and paste a job description. AI will provide feedback and an optimized draft.")
 
 col1, col2 = st.columns(2)
+
 with col1:
     uploaded_resume = st.file_uploader("Upload your resume", type=["pdf","docx","txt"])
+
 with col2:
-    job_description = st.text_area("Paste Job Description", height=300)
+    job_description = st.text_area("Paste Job Description here", height=300)
 
 col_buttons = st.columns(2)
 
 with col_buttons[0]:
     if st.button("✨ Get My Feedback"):
         if not uploaded_resume or not job_description:
-            st.warning("Upload resume and paste job description first.")
+            st.warning("Upload a resume and paste a job description first.")
         else:
-            with st.spinner("Analyzing..."):
-                resume_text = get_resume_text(uploaded_resume)
-                if resume_text:
-                    feedback = get_ai_feedback(resume_text, job_description)
+            with st.spinner("Analyzing resume..."):
+                text = get_resume_text(uploaded_resume)
+                if text:
+                    feedback = get_ai_feedback(text, job_description)
 
             if feedback:
                 st.markdown("---")
                 st.header("📋 Personalized Feedback")
-                st.metric("Match Score", f"{feedback.get('match_score', 0)}%")
-                st.success(f"Summary: {feedback.get('summary', '')}")
-                for section, items in [
-                    ("Missing Keywords & Skills", feedback.get("missing_keywords", [])),
-                    ("Formatting Suggestions", feedback.get("formatting_suggestions", [])),
-                    ("Experience Improvements", feedback.get("experience_improvements", [])),
-                    ("Overall Tips", feedback.get("overall_tips", []))
-                ]:
-                    st.markdown(f"### {section}")
-                    for item in items:
+                st.metric("Resume Match Score", f"{feedback.get('match_score',0)}%")
+                st.success(f"*Summary:* {feedback.get('summary','No summary')}")
+                for section, title in [("missing_keywords", "🔑 Missing Keywords & Skills"),
+                                       ("formatting_suggestions", "📝 Formatting & Clarity"),
+                                       ("experience_improvements", "🚀 Experience Improvements"),
+                                       ("overall_tips", "✨ Overall Tips")]:
+                    st.markdown(f"### {title}")
+                    for item in feedback.get(section, []):
                         st.write(f"• {item}")
                 st.balloons()
 
 with col_buttons[1]:
     if st.button("📝 Create Optimized Draft"):
         if not uploaded_resume or not job_description:
-            st.warning("Upload resume and paste job description first.")
+            st.warning("Upload a resume and paste a job description first.")
         else:
-            with st.spinner("Creating draft..."):
-                resume_text = get_resume_text(uploaded_resume)
-                if resume_text:
-                    draft = create_optimized_draft(resume_text, job_description)
+            with st.spinner("Creating optimized draft..."):
+                text = get_resume_text(uploaded_resume)
+                if text:
+                    draft = create_optimized_draft(text, job_description)
 
             if draft:
                 st.markdown("---")
                 st.header("✍️ Optimized Resume Draft")
-                st.info("Review and personalize before use.")
+                st.info("Review and personalize before using!")
                 st.markdown(draft)
-                st.download_button("Download Draft", draft, file_name="optimized_resume.md", mime="text/markdown")
+                st.download_button("Download as Markdown", draft, file_name="optimized_resume.md", mime="text/markdown")
