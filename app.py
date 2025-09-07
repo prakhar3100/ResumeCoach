@@ -7,22 +7,27 @@ import pdfplumber
 from dotenv import load_dotenv
 from docx import Document
 
-# Load environment variables from .env file
+# --- Load environment variables ---
 load_dotenv()
 groq_api_key = os.getenv("GROQ_API_KEY")
 
+# Fallback: Streamlit Cloud secrets
+if not groq_api_key:
+    groq_api_key = st.secrets.get("GROQ_API_KEY", None)
+
+# --- Streamlit Page Config ---
 st.set_page_config(page_title="ResumeCoach AI", layout="wide")
 st.title("🎯 ResumeCoach AI")
 st.subheader("Your AI-powered mentor for a perfect resume.")
 
-# Show if API key loaded (debug)
+# Check API Key
 if groq_api_key:
     st.success("🔑 API key loaded successfully!")
 else:
-    st.error("❌ API key not found! Please set GROQ_API_KEY in your .env file.")
+    st.error("❌ API key not found! Please set GROQ_API_KEY in `.env` (local) or Streamlit `Secrets` (cloud).")
     st.stop()
 
-# Initialize Groq client
+# --- Initialize Groq Client ---
 try:
     client = Groq(api_key=groq_api_key)
 except Exception as e:
@@ -30,6 +35,7 @@ except Exception as e:
     st.stop()
 
 
+# ---------------- File Processing ----------------
 def get_resume_text(uploaded_file):
     """Extract text from PDF, TXT, or DOCX files"""
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
@@ -50,10 +56,7 @@ def get_resume_text(uploaded_file):
     elif file_extension == '.docx':
         try:
             document = Document(uploaded_file)
-            full_text = []
-            for para in document.paragraphs:
-                full_text.append(para.text)
-            return "\n".join(full_text)
+            return "\n".join([para.text for para in document.paragraphs])
         except Exception as e:
             st.error(f"Error reading DOCX file: {e}")
             return None
@@ -66,6 +69,7 @@ def get_resume_text(uploaded_file):
             return None
 
 
+# ---------------- AI Feedback ----------------
 def get_ai_feedback(resume_text, job_description):
     system_prompt = """
     You are an AI-powered resume and career coach. Your task is to analyze a resume based on a provided job description and offer actionable, constructive feedback.
@@ -92,9 +96,6 @@ def get_ai_feedback(resume_text, job_description):
         "<Bullet point suggestion 2>"
       ]
     }
-
-    The 'match_score' should be a numerical value (0-100) representing how well the resume aligns with the job description.
-    The suggestions in the arrays should be concise, specific, and actionable. Use emojis where appropriate to make the feedback clear. For example: "💡 Use stronger action verbs like 'managed' or 'led'."
     """
 
     user_prompt = f"""
@@ -120,7 +121,7 @@ def get_ai_feedback(resume_text, job_description):
 
         feedback_json_str = response.choices[0].message.content
 
-        # Debug: show raw response so you can see what API returned
+        # Debug: show raw response
         st.text_area("🛠️ Raw API Response (Feedback)", feedback_json_str, height=300)
 
         return json.loads(feedback_json_str)
@@ -135,22 +136,12 @@ def get_ai_feedback(resume_text, job_description):
         return None
 
 
+# ---------------- Draft Resume ----------------
 def create_optimized_draft(resume_text, job_description):
     system_prompt = """
     You are a world-class professional resume writer. Your task is to rewrite a resume to be highly optimized for a specific job description.
 
     Your response must be a single, well-structured resume draft in Markdown format.
-
-    The draft should include:
-    - A bold name at the top.
-    - Contact information.
-    - A Professional Summary section that is concise and directly tailored to the job description's requirements.
-    - An Experience section. Each role should have a few bullet points that start with strong, professional action verbs. The bullet points must incorporate keywords and skills from the job description and, where possible, quantify achievements (e.g., "increased sales by 15%").
-    - A Skills section.
-    - An Education section.
-    - Other relevant sections like "Projects," "Certifications," or "Awards" as appropriate.
-
-    Do not include any other text, prefaces, or explanations in your response. The response must be a single markdown-formatted resume.
     """
 
     user_prompt = f"""
@@ -175,7 +166,7 @@ def create_optimized_draft(resume_text, job_description):
 
         draft = response.choices[0].message.content
 
-        # Debug: show raw API response
+        # Debug: show raw response
         st.text_area("🛠️ Raw API Response (Draft)", draft, height=300)
 
         return draft
@@ -185,7 +176,7 @@ def create_optimized_draft(resume_text, job_description):
         return None
 
 
-# --- Streamlit UI ---
+# ---------------- Streamlit UI ----------------
 st.markdown("""
     Upload your resume and paste a job description. Our AI will provide tailored feedback and generate an optimized resume draft.
 """)
@@ -221,10 +212,7 @@ with col_buttons[0]:
             if feedback:
                 st.markdown("---")
                 st.header("📋 Your Personalized Feedback")
-                st.metric(
-                    label="Resume Match Score",
-                    value=f"{feedback.get('match_score', 0)}%"
-                )
+                st.metric("Resume Match Score", f"{feedback.get('match_score', 0)}%")
                 st.success(f"*Quick Summary:* {feedback.get('summary', 'No summary provided.')}")
                 st.markdown("### 🔑 Missing Keywords & Skills")
                 for item in feedback.get('missing_keywords', []):
