@@ -6,6 +6,7 @@ from groq import Groq
 import pdfplumber
 from dotenv import load_dotenv
 from docx import Document
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -66,70 +67,41 @@ def get_resume_text(uploaded_file):
             return None
 
 
+def sanitize_json(raw_text):
+    """Remove any accidental characters that break JSON"""
+    cleaned_text = re.sub(r'\)\s*([\],])', r'\1', raw_text)
+    return cleaned_text
+
+
 def get_ai_feedback(resume_text, job_description):
     system_prompt = """
     You are an AI-powered resume and career coach. Your task is to analyze a resume based on a provided job description and offer actionable, constructive feedback.
 
-    Your response must be a single JSON object. Do not include any other text, prefaces, or explanations. The JSON object should have the following structure:
-
-    {
-      "match_score": <number between 0 and 100>,
-      "summary": "<A short, positive summary of the resume's strengths>",
-      "missing_keywords": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ],
-      "formatting_suggestions": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ],
-      "experience_improvements": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ],
-      "overall_tips": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ]
-    }
-
-    The 'match_score' should be a numerical value (0-100) representing how well the resume aligns with the job description.
-    The suggestions in the arrays should be concise, specific, and actionable. Use emojis where appropriate to make the feedback clear. For example: "💡 Use stronger action verbs like 'managed' or 'led'."
+    Your response must be a single JSON object with:
+    match_score, summary, missing_keywords, formatting_suggestions, experience_improvements, overall_tips.
     """
 
     user_prompt = f"""
-    Here is the resume:
-    ---
+    Resume:
     {resume_text}
-    ---
-    
-    Here is the job description:
-    ---
+
+    Job Description:
     {job_description}
-    ---
     """
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-        )
+        response = client.llm(prompt=f"{system_prompt}\n{user_prompt}")
+        feedback_json_str = response.output_text if hasattr(response, 'output_text') else str(response)
 
-        feedback_json_str = response.choices[0].message.content
-
-        # Debug: show raw response so you can see what API returned
         st.text_area("🛠️ Raw API Response (Feedback)", feedback_json_str, height=300)
 
-        return json.loads(feedback_json_str)
+        cleaned = sanitize_json(feedback_json_str)
+        return json.loads(cleaned)
 
     except json.JSONDecodeError as e:
         st.error(f"❌ JSON decoding error: {e}")
         st.error("The API response was not valid JSON. See raw response above.")
         return None
-
     except Exception as e:
         st.error(f"API Error: {e}")
         return None
@@ -137,49 +109,23 @@ def get_ai_feedback(resume_text, job_description):
 
 def create_optimized_draft(resume_text, job_description):
     system_prompt = """
-    You are a world-class professional resume writer. Your task is to rewrite a resume to be highly optimized for a specific job description.
-
-    Your response must be a single, well-structured resume draft in Markdown format.
-
-    The draft should include:
-    - A bold name at the top.
-    - Contact information.
-    - A Professional Summary section that is concise and directly tailored to the job description's requirements.
-    - An Experience section. Each role should have a few bullet points that start with strong, professional action verbs. The bullet points must incorporate keywords and skills from the job description and, where possible, quantify achievements (e.g., "increased sales by 15%").
-    - A Skills section.
-    - An Education section.
-    - Other relevant sections like "Projects," "Certifications," or "Awards" as appropriate.
-
-    Do not include any other text, prefaces, or explanations in your response. The response must be a single markdown-formatted resume.
+    You are a world-class professional resume writer. Rewrite a resume to be highly optimized for a specific job description.
+    Return a single markdown-formatted resume draft.
     """
 
     user_prompt = f"""
-    Here is the original resume text:
-    ---
+    Original Resume:
     {resume_text}
-    ---
 
-    Here is the job description:
-    ---
+    Job Description:
     {job_description}
-    ---
     """
+
     try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-        )
-
-        draft = response.choices[0].message.content
-
-        # Debug: show raw API response
+        response = client.llm(prompt=f"{system_prompt}\n{user_prompt}")
+        draft = response.output_text if hasattr(response, 'output_text') else str(response)
         st.text_area("🛠️ Raw API Response (Draft)", draft, height=300)
-
         return draft
-
     except Exception as e:
         st.error(f"API Error: {e}")
         return None
@@ -187,7 +133,7 @@ def create_optimized_draft(resume_text, job_description):
 
 # --- Streamlit UI ---
 st.markdown("""
-    Upload your resume and paste a job description. Our AI will provide tailored feedback and generate an optimized resume draft.
+Upload your resume and paste a job description. Our AI will provide tailored feedback and generate an optimized resume draft.
 """)
 
 col1, col2 = st.columns(2)
