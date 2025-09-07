@@ -72,39 +72,26 @@ def get_resume_text(uploaded_file):
 # ---------------- AI Feedback ----------------
 def get_ai_feedback(resume_text, job_description):
     system_prompt = """
-    You are an AI-powered resume and career coach. Your task is to analyze a resume based on a provided job description and offer actionable, constructive feedback.
+    You are an AI-powered resume and career coach. Analyze a resume based on a provided job description and offer actionable, constructive feedback.
 
-    Your response must be a single JSON object. Do not include any other text, prefaces, or explanations. The JSON object should have the following structure:
-
+    Your response must be a single JSON object:
     {
-      "match_score": <number between 0 and 100>,
-      "summary": "<A short, positive summary of the resume's strengths>",
-      "missing_keywords": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ],
-      "formatting_suggestions": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ],
-      "experience_improvements": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ],
-      "overall_tips": [
-        "<Bullet point suggestion 1>",
-        "<Bullet point suggestion 2>"
-      ]
+      "match_score": <0-100>,
+      "summary": "<Short, positive summary>",
+      "missing_keywords": ["<Bullet point 1>", "<Bullet point 2>"],
+      "formatting_suggestions": ["<Bullet point 1>", "<Bullet point 2>"],
+      "experience_improvements": ["<Bullet point 1>", "<Bullet point 2>"],
+      "overall_tips": ["<Bullet point 1>", "<Bullet point 2>"]
     }
     """
 
     user_prompt = f"""
-    Here is the resume:
+    Resume:
     ---
     {resume_text}
     ---
     
-    Here is the job description:
+    Job Description:
     ---
     {job_description}
     ---
@@ -120,17 +107,12 @@ def get_ai_feedback(resume_text, job_description):
         )
 
         feedback_json_str = response.choices[0].message.content
-
-        # Debug: show raw response
         st.text_area("🛠️ Raw API Response (Feedback)", feedback_json_str, height=300)
-
         return json.loads(feedback_json_str)
 
     except json.JSONDecodeError as e:
         st.error(f"❌ JSON decoding error: {e}")
-        st.error("The API response was not valid JSON. See raw response above.")
         return None
-
     except Exception as e:
         st.error(f"API Error: {e}")
         return None
@@ -139,18 +121,16 @@ def get_ai_feedback(resume_text, job_description):
 # ---------------- Draft Resume ----------------
 def create_optimized_draft(resume_text, job_description):
     system_prompt = """
-    You are a world-class professional resume writer. Your task is to rewrite a resume to be highly optimized for a specific job description.
-
-    Your response must be a single, well-structured resume draft in Markdown format.
+    Rewrite a resume to be highly optimized for a specific job description in Markdown format.
     """
 
     user_prompt = f"""
-    Here is the original resume text:
+    Original Resume:
     ---
     {resume_text}
     ---
 
-    Here is the job description:
+    Job Description:
     ---
     {job_description}
     ---
@@ -165,10 +145,7 @@ def create_optimized_draft(resume_text, job_description):
         )
 
         draft = response.choices[0].message.content
-
-        # Debug: show raw response
         st.text_area("🛠️ Raw API Response (Draft)", draft, height=300)
-
         return draft
 
     except Exception as e:
@@ -177,63 +154,56 @@ def create_optimized_draft(resume_text, job_description):
 
 
 # ---------------- Streamlit UI ----------------
-st.markdown("""
-    Upload your resume and paste a job description. Our AI will provide tailored feedback and generate an optimized resume draft.
-""")
+st.markdown("Upload your resume and paste a job description. Our AI will provide feedback and generate an optimized resume draft.")
 
 col1, col2 = st.columns(2)
 
 with col1:
     uploaded_resume = st.file_uploader(
-        "Upload your resume",
-        type=["pdf", "txt", "docx"],
-        help="Accepted formats: PDF, TXT, DOCX"
+        "Upload your resume", type=["pdf", "txt", "docx"], help="Accepted formats: PDF, TXT, DOCX"
     )
 
 with col2:
     job_description = st.text_area(
         "Paste the Job Description here",
         height=300,
-        placeholder="E.g., 'We are looking for a Data Scientist with experience in Python...'"
+        placeholder="E.g., 'Looking for a Data Scientist with Python experience...'"
     )
 
 col_buttons = st.columns(2)
 
 with col_buttons[0]:
-    if st.button("✨ Get My Feedback", use_container_width=True, type="primary"):
+    if st.button("✨ Get My Feedback", use_container_width=True):
         if not uploaded_resume or not job_description:
-            st.warning("Please upload a resume and paste a job description to get started.")
+            st.warning("Upload a resume and paste a job description first.")
         else:
-            with st.spinner("Analyzing your resume... This may take a moment."):
+            with st.spinner("Analyzing your resume..."):
                 resume_text = get_resume_text(uploaded_resume)
                 if resume_text:
                     feedback = get_ai_feedback(resume_text, job_description)
 
             if feedback:
                 st.markdown("---")
-                st.header("📋 Your Personalized Feedback")
+                st.header("📋 Personalized Feedback")
                 st.metric("Resume Match Score", f"{feedback.get('match_score', 0)}%")
-                st.success(f"*Quick Summary:* {feedback.get('summary', 'No summary provided.')}")
-                st.markdown("### 🔑 Missing Keywords & Skills")
-                for item in feedback.get('missing_keywords', []):
-                    st.write(f"• {item}")
-                st.markdown("### 📝 Formatting & Clarity Suggestions")
-                for item in feedback.get('formatting_suggestions', []):
-                    st.write(f"• {item}")
-                st.markdown("### 🚀 Experience & Achievement Improvements")
-                for item in feedback.get('experience_improvements', []):
-                    st.write(f"• {item}")
-                st.markdown("### ✨ Overall Tips")
-                for item in feedback.get('overall_tips', []):
-                    st.write(f"• {item}")
+                st.success(f"*Summary:* {feedback.get('summary', 'No summary.')}")
+                for section, items in [
+                    ("🔑 Missing Keywords & Skills", feedback.get('missing_keywords', [])),
+                    ("📝 Formatting Suggestions", feedback.get('formatting_suggestions', [])),
+                    ("🚀 Experience Improvements", feedback.get('experience_improvements', [])),
+                    ("✨ Overall Tips", feedback.get('overall_tips', []))
+                ]:
+                    st.markdown(f"### {section}")
+                    for item in items:
+                        st.write(f"• {item}")
                 st.balloons()
 
 with col_buttons[1]:
     if st.button("📝 Create Optimized Draft", use_container_width=True):
         if not uploaded_resume or not job_description:
-            st.warning("Please upload a resume and paste a job description to get started.")
+            st.warning("Upload a resume and paste a job description first.")
         else:
-            with st.spinner("Creating your optimized resume draft..."):
+            with st.spinner("Creating optimized resume draft..."):
                 resume_text = get_resume_text(uploaded_resume)
                 if resume_text:
                     draft = create_optimized_draft(resume_text, job_description)
@@ -241,7 +211,7 @@ with col_buttons[1]:
             if draft:
                 st.markdown("---")
                 st.header("✍️ Optimized Resume Draft")
-                st.info("This is a starting draft. Be sure to review and personalize it before using it in your application!")
+                st.info("Review and personalize before using!")
                 st.markdown(draft)
                 st.download_button(
                     label="Download Draft as Markdown",
