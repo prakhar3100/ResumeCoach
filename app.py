@@ -70,6 +70,22 @@ def sanitize_json(raw_text):
     """Remove accidental characters that break JSON"""
     return re.sub(r'\)\s*([\],])', r'\1', raw_text)
 
+def parse_feedback(feedback_text):
+    """Parse potentially malformed JSON safely"""
+    if not feedback_text.strip():
+        return {"error": "API returned an empty response."}
+    
+    cleaned = sanitize_json(feedback_text)
+    # Extract {...} from response
+    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            return {"error": "Unable to parse JSON from API response."}
+    else:
+        return {"error": "No JSON object found in API response."}
+
 def get_ai_feedback(resume_text, job_description):
     system_prompt = """
     You are an AI-powered resume and career coach. Your task is to analyze a resume based on a provided job description and offer actionable, constructive feedback.
@@ -98,13 +114,8 @@ Job Description:
         feedback_json_str = response.choices[0].message.content
         st.text_area("🛠️ Raw API Response (Feedback)", feedback_json_str, height=300)
 
-        cleaned = sanitize_json(feedback_json_str)
-        return json.loads(cleaned)
+        return parse_feedback(feedback_json_str)
 
-    except json.JSONDecodeError as e:
-        st.error(f"❌ JSON decoding error: {e}")
-        st.error("The API response was not valid JSON. See raw response above.")
-        return None
     except Exception as e:
         st.error(f"API Error: {e}")
         return None
@@ -178,18 +189,21 @@ with col_buttons[0]:
             if feedback:
                 st.markdown("---")
                 st.header("📋 Personalized Feedback")
-                st.metric("Resume Match Score", f"{feedback.get('match_score', 0)}%")
-                st.success(f"*Summary:* {feedback.get('summary', 'No summary provided.')}")
-                for section, items in [
-                    ("🔑 Missing Keywords & Skills", feedback.get('missing_keywords', [])),
-                    ("📝 Formatting & Clarity Suggestions", feedback.get('formatting_suggestions', [])),
-                    ("🚀 Experience & Achievement Improvements", feedback.get('experience_improvements', [])),
-                    ("✨ Overall Tips", feedback.get('overall_tips', []))
-                ]:
-                    st.markdown(f"### {section}")
-                    for item in items:
-                        st.write(f"• {item}")
-                st.balloons()
+                if "error" in feedback:
+                    st.error(feedback["error"])
+                else:
+                    st.metric("Resume Match Score", f"{feedback.get('match_score', 0)}%")
+                    st.success(f"*Summary:* {feedback.get('summary', 'No summary provided.')}")
+                    for section, items in [
+                        ("🔑 Missing Keywords & Skills", feedback.get('missing_keywords', [])),
+                        ("📝 Formatting & Clarity Suggestions", feedback.get('formatting_suggestions', [])),
+                        ("🚀 Experience & Achievement Improvements", feedback.get('experience_improvements', [])),
+                        ("✨ Overall Tips", feedback.get('overall_tips', []))
+                    ]:
+                        st.markdown(f"### {section}")
+                        for item in items:
+                            st.write(f"• {item}")
+                    st.balloons()
 
 with col_buttons[1]:
     if st.button("📝 Create Optimized Draft", use_container_width=True):
