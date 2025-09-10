@@ -36,6 +36,7 @@ except Exception as e:
 # Helper functions
 # ----------------------------
 def get_resume_text(uploaded_file):
+    """Extracts text from various file types."""
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
 
     if file_extension == '.pdf':
@@ -86,20 +87,29 @@ def parse_feedback(feedback_text):
     else:
         return {"error": "No JSON object found in API response."}
 
+def truncate_text(text, max_chars):
+    """Truncates text to a maximum number of characters."""
+    if len(text) > max_chars:
+        # Truncate and add a note
+        return text[:max_chars] + "\n\n...[TEXT TRUNCATED DUE TO LENGTH]..."
+    return text
+
 def get_ai_feedback(resume_text, job_description):
+    """Gets AI feedback by analyzing the resume and job description."""
     system_prompt = """
     You are an AI-powered resume and career coach. Your task is to analyze a resume based on a provided job description and offer actionable, constructive feedback.
 
     Return a single JSON object with keys:
     match_score, summary, missing_keywords, formatting_suggestions, experience_improvements, overall_tips.
     """
-
+    
+    # Combine and truncate the user prompt to stay within token limits
     user_prompt = f"""
 Resume:
-{resume_text}
+{truncate_text(resume_text, 2000)}
 
 Job Description:
-{job_description}
+{truncate_text(job_description, 2000)}
 """
 
     try:
@@ -121,17 +131,19 @@ Job Description:
         return None
 
 def create_optimized_draft(resume_text, job_description):
+    """Creates an optimized resume draft based on the job description."""
     system_prompt = """
     You are a world-class professional resume writer. Rewrite a resume to be highly optimized for a specific job description.
     Return a single markdown-formatted resume draft.
     """
-
+    
+    # Combine and truncate the user prompt to stay within token limits
     user_prompt = f"""
 Original Resume:
-{resume_text}
+{truncate_text(resume_text, 2000)}
 
 Job Description:
-{job_description}
+{truncate_text(job_description, 2000)}
 """
 
     try:
