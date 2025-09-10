@@ -7,25 +7,39 @@ import pdfplumber
 from dotenv import load_dotenv
 from docx import Document
 import re
+
+# ----------------------------
+# Load environment variables
+# ----------------------------
 load_dotenv()
 groq_api_key = os.getenv("GROQ_API_KEY")
+
 st.set_page_config(page_title="ResumeCoach AI", layout="wide")
 st.title("🎯 ResumeCoach AI")
 st.subheader("Your AI-powered mentor for a perfect resume.")
+
+# Check API key
 if groq_api_key:
     st.success("🔑 API key loaded successfully!")
 else:
     st.error("❌ API key not found! Please set GROQ_API_KEY in your .env file.")
     st.stop()
+
+# Initialize Groq client
 try:
     client = Groq(api_key=groq_api_key)
 except Exception as e:
     st.error(f"Error initializing Groq client: {e}")
     st.stop()
+
+# ----------------------------
+# Helper functions
+# ----------------------------
 def get_resume_text(uploaded_file):
     """Extracts text from various file types."""
     file_extension = os.path.splitext(uploaded_file.name)[1].lower()
- if file_extension == '.pdf':
+
+    if file_extension == '.pdf':
         try:
             with pdfplumber.open(uploaded_file) as pdf:
                 text = ""
